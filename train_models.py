@@ -2,17 +2,20 @@ import glob
 import pandas as pd
 import joblib
 import os
+import nltk
 from imblearn.over_sampling import SMOTE
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import ComplementNB
-from sklearn.preprocessing import LabelEncoder
-from sklearn.svm import LinearSVC
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline
 from nltk.stem import WordNetLemmatizer
-from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder
 
+
+nltk.download('wordnet')
 
 # Lemmatizing words for better features
 def clean_text(text):
@@ -32,7 +35,7 @@ for file_path in files_to_delete:
             os.remove(file_path)
             print(f"  [DELETED] {file_path}")
         else:
-            print(f"  [SKIPPED] {file_path} (it is a subfolder)")
+            print(f"  [SKIPPED] {file_path} ")
 
     except Exception as e:
         print(f"  [FAILED]  Could not delete {file_path}. Error: {e}")
@@ -102,16 +105,18 @@ param_grid_nb = {
     'model__fit_prior': [True, False]
 }
 
-# Pipeline 2: LinearSVC
+# Pipeline 2: LogisticRegression
 pipe_svc = Pipeline([
     ('vectorizer', tuned_vectorizer),
     ('smote', SMOTE(random_state=42)),
-    ('model', LinearSVC())
+    ('model', LogisticRegression())
 ])
 
-# Param grid for LinearSVC tuning
-param_grid_svc = {
-    'model__C': [0.1, 1, 10, 100],
+# Param grid for LogisticRegression tuning
+param_grid_logreg = {
+    'model__C': [0.1, 1, 10],
+    'model__solver': ['lbfgs', 'saga', 'sag'],
+    'model__max_iter': [1000]
 }
 
 # Pipeline 3: Random Forest
@@ -151,9 +156,9 @@ tuners_to_run = [
         "params": {**param_grid_vectorizer, **param_grid_nb}
     },
     {
-        "name": "linear_svc",
+        "name": "log_reg",
         "estimator": pipe_svc,
-        "params": {**param_grid_vectorizer, **param_grid_svc}
+        "params": {**param_grid_vectorizer, **param_grid_logreg}
     },
     {
         "name": "random_forest",

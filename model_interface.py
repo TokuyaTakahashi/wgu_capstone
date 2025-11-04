@@ -1,4 +1,4 @@
-import numpy as np
+import plotly.express as px
 import pandas as pd
 import joblib
 import os
@@ -12,18 +12,33 @@ from sklearn.metrics import confusion_matrix
 
 def apply_prediction():
     if st.session_state.ticket_input:
-        full_path = os.path.join('trained_models', trained_models[st.session_state.sidebar])
+        full_path = os.path.join('trained_models', trained_models[st.session_state.sidebar]['file_name'])
         loaded_pipeline = joblib.load(full_path)
         ticket_desc = st.session_state.ticket_input
         st.session_state.prediction = loaded_pipeline.predict([ticket_desc])
+        st.session_state.prediction_prob = loaded_pipeline.predict_proba([ticket_desc])
     else:
         st.session_state.prediction = "None"
 
 
-trained_models = {"Naive Bayes": "complement_nb_ticket_classifier.pkl",
-                  "Linear Support Vector": "linear_svc_ticket_classifier.pkl",
-                  "Random Forest": "random_forest_ticket_classifier.pkl",
-                  "XG Boost": "xg_boost_ticket_classifier.pkl"}
+trained_models = {
+    "Naive Bayes": {
+        "file_name": "complement_nb_ticket_classifier.pkl",
+        "encoding_required": False
+    },
+    "Logistic Regression": {
+        "file_name": "log_reg_ticket_classifier.pkl",
+        "encoding_required": False
+    },
+    "Random Forest": {
+        "file_name": "random_forest_ticket_classifier.pkl",
+        "encoding_required": False
+    },
+    "XG Boost": {
+        "file_name": "xg_boost_ticket_classifier.pkl",
+        "encoding_required": True
+    }
+}
 
 routing_group_styles = {
     "Billing and Payments": ("💵", "green"),
@@ -51,19 +66,19 @@ with st.sidebar:
         st.badge(group, icon=emoji, color=color)
 
 # Load trained models and test data for predictions and accuracy metrics
-selected_model = joblib.load(os.path.join('trained_models', trained_models[st.session_state.sidebar]))
+selected_model = joblib.load(os.path.join('trained_models', trained_models[st.session_state.sidebar]["file_name"]))
 X_test = joblib.load(os.path.join('trained_models', 'X_test.pkl'))
 y_test = joblib.load(os.path.join('trained_models', 'y_test.pkl'))
-
 encoder = LabelEncoder()
-y_test_encoded = encoder.fit_transform(y_test)
+encoder.fit_transform(y_test)
 
 # Generate predictions using the selected model
-predictions = selected_model.predict(X_test)
-class_names = selected_model.named_steps['model'].classes_
+predictions = selected_model.predict(X_test) if not trained_models[st.session_state.sidebar]["encoding_required"] else encoder.inverse_transform(selected_model.predict(X_test))
+class_names = selected_model.named_steps['model'].classes_ if not trained_models[st.session_state.sidebar]["encoding_required"] else encoder.inverse_transform(selected_model.named_steps['model'].classes_)
 vectorizer = selected_model.named_steps['vectorizer']
 model = selected_model.named_steps['model']
-
+viridis_palette = list(sns.color_palette(palette='viridis',
+                                         n_colors=len(class_names)).as_hex())
 st.header("Ticket Classifier")
 # Main content - Tabs for live prediction, model accuracy, and data visualizations
 with st.container():
@@ -72,34 +87,53 @@ with st.container():
     with tab1:
         # Text area to enter ticket input for routing group prediction
         st.text_area('Ticket Description', None, key="ticket_input", on_change=apply_prediction,
-                     placeholder="Enter a short description for an IT ticket to get a corresponding routing group")
+                         placeholder="Enter a short description for an IT ticket to get a corresponding routing group")
 
         # Display prediction as a badge
         if st.session_state.ticket_input and 'prediction' in st.session_state:
             prediction = encoder.inverse_transform(st.session_state.prediction)[0] if model.__class__.__name__ == 'XGBClassifier' else st.session_state.prediction[0]
+            df_proba = pd.DataFrame({
+                "Queue": class_names,
+                "Probability": st.session_state.prediction_prob[0]
+            })
+            fig = px.pie(df_proba, values='Probability', names='Queue', color_discrete_sequence=viridis_palette, title='Prediction Probability')
+            fig.update_traces(textposition='outside', textinfo='percent+label',
+                              hole=0.6, hoverinfo="label+percent+name")
         else:
+            fig = None
             prediction = "None"
         styling = routing_group_styles[prediction]
         st.badge(prediction, icon=f"{styling[0]}", color=f'{styling[1]}', width="stretch")
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
     with tab2:
         st.subheader("Classification Report")
-        if model.__class__.__name__ == 'XGBClassifier':
-            report = classification_report(y_test_encoded, predictions, output_dict=True)
-        else:
-            report = classification_report(y_test, predictions, output_dict=True)
+        report = classification_report(y_test, predictions, output_dict=True)
         st.dataframe(pd.DataFrame(report).transpose())
     with tab3:
         # Show routing group sample data count
-        st.subheader("Routing Group Ticket Count")
-        st.bar_chart(y_test.value_counts())
+        st.subheader('Ticket Distribution by Queue')
+        df_route_group = pd.DataFrame(y_test.value_counts())
+        df_route_group['percent'] = [round(i*100/sum(df_route_group['count']),1) for i in df_route_group['count']]
+        color_tgroup = dict(zip(df_route_group.index, viridis_palette))
+        # add a color to the dictionary
+        color_tgroup['(?)'] = '#e9e9e9'
+
+        # create a list of percentages for labeling
+        labels = [f'{i}%' for i in df_route_group['percent']]
+
+        fig = px.treemap(df_route_group, path=[px.Constant('All Routing Groups'), df_route_group.index],
+                         values=df_route_group['percent'],
+                         color=df_route_group.index,
+                         color_discrete_map=color_tgroup,
+                         hover_name=labels)
+        fig.update_layout(margin=dict(t=50, l=25, r=25, b=25), showlegend=True)
+        st.plotly_chart(fig, use_container_width=True)
 
         # Plot confusion matrix
         plt.style.use('dark_background')
         st.subheader("Confusion Matrix")
-        if model.__class__.__name__ == 'XGBClassifier':
-            cm = confusion_matrix(y_test_encoded, predictions, labels=class_names, normalize='true')
-        else:
-            cm = confusion_matrix(y_test, predictions, labels=class_names, normalize='true')
+        cm = confusion_matrix(y_test, predictions, labels=class_names, normalize='true')
         fig, ax = plt.subplots()
         sns.heatmap(cm, annot=True, fmt='1.0%', cmap='viridis',
                     xticklabels=class_names, yticklabels=class_names, ax=ax)
