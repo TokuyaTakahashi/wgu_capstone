@@ -16,6 +16,7 @@ def apply_prediction():
         loaded_pipeline = joblib.load(full_path)
         ticket_desc = st.session_state.ticket_input
         st.session_state.prediction = loaded_pipeline.predict([ticket_desc])
+        print(st.session_state.prediction)
         st.session_state.prediction_prob = loaded_pipeline.predict_proba([ticket_desc])
     else:
         st.session_state.prediction = "None"

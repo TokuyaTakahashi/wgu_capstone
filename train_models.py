@@ -82,10 +82,10 @@ y = df['queue'].copy()
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 y_train_encoded = LabelEncoder().fit_transform(y_train)
 
-# Define the tuned vectorizer (this is your feature engineering)
+# Define the tuned vectorizer
 tuned_vectorizer = TfidfVectorizer(
     stop_words='english',
-    ngram_range=(1, 2),  # Use 1- and 2-word n-grams
+    ngram_range=(1, 2),
     max_df=0.90,
     min_df=5,
     max_features=10000
@@ -141,6 +141,16 @@ pipe_xg_boost = Pipeline([
     ('model', XGBClassifier(objective='multi:softprob', random_state=42, eval_metric='mlogloss', n_jobs=-1))
 ])
 
+param_grid_xg = {
+    'model__max_depth': [3, 5, 10],
+    'model__learning_rate':[0.01, 0.1],
+    'model__n_estimators': [100, 200, 500],
+    'model__gamma': [0, 2],
+    'model__reg_alpha': [0.01, 1, 10, 100],
+    'model__reg_lambda': [0.01, 1, 10, 100],
+    'model__colsample_bytree': [0.6, 0.8, 1.0]
+}
+
 param_grid_vectorizer = {
     'vectorizer__ngram_range': [(1, 1), (1, 2), (1, 3)],
     'vectorizer__max_features': [10000, 15000],
@@ -165,11 +175,11 @@ tuners_to_run = [
         "estimator": pipe_rf,
         "params": {**param_grid_vectorizer, **param_grid_rf}
     },
-    {
-        "name": "xg_boost",
-        "estimator": pipe_xg_boost,
-        "params": {**param_grid_vectorizer}
-    }
+    # {
+    #     "name": "xg_boost",
+    #     "estimator": pipe_xg_boost,
+    #     "params": {**param_grid_vectorizer, **param_grid_xg}
+    # }
 ]
 
 joblib.dump(X_test, f"trained_models/X_test.pkl")
@@ -178,13 +188,13 @@ joblib.dump(y_test, f"trained_models/y_test.pkl")
 for tuner in tuners_to_run:
     print(f"--- Tuning Model: {tuner['name']} ---")
 
-    # Set up the Randomized Search for *this* model
+    # Set up the Randomized Search
     random_search = RandomizedSearchCV(
         estimator=tuner["estimator"],
         param_distributions=tuner["params"],
         n_iter=5,
         cv=3,
-        scoring='f1_weighted',
+        scoring='f1_macro',
         random_state=42,
         verbose=1
     )
