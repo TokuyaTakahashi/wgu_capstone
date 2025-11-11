@@ -28,6 +28,7 @@ def clean_text(text):
     return " ".join(lemmatized_tokens)
 
 
+os.makedirs("trained_models", exist_ok=True)
 # Removal of previously created models (useful when attempting and tuning different models)
 files_to_delete = glob.glob(os.path.join('trained_models/', '*'))
 for file_path in files_to_delete:
@@ -82,7 +83,7 @@ X = df['input_text'].copy()
 # Routing Group column
 y = df['queue'].copy()
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, stratify=y, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
 df_train = pd.DataFrame({
     'input_text': X_train,
