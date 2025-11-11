@@ -12,34 +12,14 @@ from sklearn.metrics import confusion_matrix
 
 def apply_prediction():
     if st.session_state.ticket_input:
-        full_path = os.path.join('trained_models', trained_models[st.session_state.sidebar]['file_name'])
+        full_path = os.path.join('trained_models', trained_models[st.session_state.sidebar])
         loaded_pipeline = joblib.load(full_path)
         ticket_desc = st.session_state.ticket_input
         st.session_state.prediction = loaded_pipeline.predict([ticket_desc])
-        print(st.session_state.prediction)
         st.session_state.prediction_prob = loaded_pipeline.predict_proba([ticket_desc])
     else:
         st.session_state.prediction = "None"
 
-
-trained_models = {
-    "Naive Bayes": {
-        "file_name": "complement_nb_ticket_classifier.pkl",
-        "encoding_required": False
-    },
-    "Logistic Regression": {
-        "file_name": "log_reg_ticket_classifier.pkl",
-        "encoding_required": False
-    },
-    "Random Forest": {
-        "file_name": "random_forest_ticket_classifier.pkl",
-        "encoding_required": False
-    },
-    "XG Boost": {
-        "file_name": "xg_boost_ticket_classifier.pkl",
-        "encoding_required": True
-    }
-}
 
 routing_group_styles = {
     "Billing and Payments": ("💵", "green"),
@@ -55,6 +35,13 @@ routing_group_styles = {
     "None": ("❌", "grey")
 }
 
+
+trained_models = {
+    "Naive Bayes": "complement_nb_ticket_classifier.pkl",
+    "Logistic Regression": "log_reg_ticket_classifier.pkl",
+    "Random Forest": "random_forest_ticket_classifier.pkl",
+}
+
 st.set_page_config(layout="centered")
 
 # Sidebar - Select box for model selection
@@ -67,15 +54,15 @@ with st.sidebar:
         st.badge(group, icon=emoji, color=color)
 
 # Load trained models and test data for predictions and accuracy metrics
-selected_model = joblib.load(os.path.join('trained_models', trained_models[st.session_state.sidebar]["file_name"]))
+selected_model = joblib.load(os.path.join('trained_models', trained_models[st.session_state.sidebar]))
 X_test = joblib.load(os.path.join('trained_models', 'X_test.pkl'))
 y_test = joblib.load(os.path.join('trained_models', 'y_test.pkl'))
 encoder = LabelEncoder()
 encoder.fit_transform(y_test)
 
 # Generate predictions using the selected model
-predictions = selected_model.predict(X_test) if not trained_models[st.session_state.sidebar]["encoding_required"] else encoder.inverse_transform(selected_model.predict(X_test))
-class_names = selected_model.named_steps['model'].classes_ if not trained_models[st.session_state.sidebar]["encoding_required"] else encoder.inverse_transform(selected_model.named_steps['model'].classes_)
+predictions = selected_model.predict(X_test)
+class_names = selected_model.named_steps['model'].classes_
 vectorizer = selected_model.named_steps['vectorizer']
 model = selected_model.named_steps['model']
 viridis_palette = list(sns.color_palette(palette='viridis',
@@ -92,7 +79,7 @@ with st.container():
 
         # Display prediction as a badge
         if st.session_state.ticket_input and 'prediction' in st.session_state:
-            prediction = encoder.inverse_transform(st.session_state.prediction)[0] if model.__class__.__name__ == 'XGBClassifier' else st.session_state.prediction[0]
+            prediction = st.session_state.prediction[0]
             df_proba = pd.DataFrame({
                 "Queue": class_names,
                 "Probability": st.session_state.prediction_prob[0]

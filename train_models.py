@@ -1,21 +1,23 @@
 import glob
-import pandas as pd
-import joblib
 import os
+import joblib
 import nltk
-from imblearn.over_sampling import SMOTE
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.naive_bayes import ComplementNB
-from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
+import pandas as pd
+from imblearn.combine import SMOTETomek, SMOTEENN
+from imblearn.over_sampling import SMOTE, ADASYN
 from imblearn.pipeline import Pipeline
+from imblearn.under_sampling import TomekLinks
 from nltk.stem import WordNetLemmatizer
-from sklearn.preprocessing import LabelEncoder
-
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.naive_bayes import ComplementNB
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+import nlpaug.augmenter.word as naw
 
 nltk.download('wordnet')
+nltk.download('averaged_perceptron_tagger_eng')
 
 # Lemmatizing words for better features
 def clean_text(text):
@@ -74,15 +76,47 @@ df['input_text'] = df['input_text'].apply(clean_text)
 df = df[df['input_text'].str.strip() != '']
 print(f'Dataframe after removing empty input_text: {len(df)} rows')
 
+# Subject + Body column
 X = df['input_text'].copy()
 
-# y is your 'Routing Group' column
+# Routing Group column
 y = df['queue'].copy()
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
-y_train_encoded = LabelEncoder().fit_transform(y_train)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, stratify=y, random_state=42)
 
-# Define the tuned vectorizer
+df_train = pd.DataFrame({
+    'input_text': X_train,
+    'queue_encoded': y_train
+})
+
+# Identify minority classes
+class_counts = df_train['queue_encoded'].value_counts()
+minority_classes = class_counts[class_counts < 500].index
+minority_df = df_train[df_train['queue_encoded'].isin(minority_classes)]
+
+print(f"Original training size: {len(df_train)}")
+print(f"Found {len(minority_classes)} minority classes to augment.")
+
+aug = naw.SynonymAug(aug_src='wordnet', stopwords=ENGLISH_STOP_WORDS)
+
+# Generate new minority samples by replacing words with synonyms to reduce imbalance
+new_texts = aug.augment(minority_df['input_text'].tolist())
+new_labels = minority_df['queue_encoded'].tolist()
+
+augmented_df = pd.DataFrame({
+    'input_text': new_texts,
+    'queue_encoded': new_labels
+})
+
+# Combine newly created samples to existing dataset
+df_train_final = pd.concat([df_train, augmented_df], ignore_index=True)
+
+X_train_augmented = df_train_final['input_text']
+y_train_augmented = df_train_final['queue_encoded']
+
+print(f"New augmented training size: {len(df_train_final)}")
+
+# Define the default vectorizer
 tuned_vectorizer = TfidfVectorizer(
     stop_words='english',
     ngram_range=(1, 2),
@@ -94,63 +128,64 @@ tuned_vectorizer = TfidfVectorizer(
 # Pipeline 1: ComplementNB
 pipe_nb = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('smote', SMOTE(random_state=42)),
+    ('sampler', SMOTE(random_state=42)),
     ('model', ComplementNB())
 ])
 
 # Param grid for ComplementNB tuning
 param_grid_nb = {
+    'sampler': [
+        SMOTE(random_state=42),
+        SMOTETomek(random_state=42, tomek=TomekLinks(sampling_strategy='majority'), n_jobs=-1),
+        ADASYN(random_state=42),
+        'passthrough'
+    ],
     'model__alpha': [0.1, 0.5, 0.75, 1.0],
     'model__norm': [True, False],
     'model__fit_prior': [True, False]
 }
 
 # Pipeline 2: LogisticRegression
-pipe_svc = Pipeline([
+pipe_log_reg = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('smote', SMOTE(random_state=42)),
-    ('model', LogisticRegression())
+    ('sampler', SMOTE(random_state=42)),
+    ('model', LogisticRegression(solver='saga', n_jobs=-1))
 ])
 
 # Param grid for LogisticRegression tuning
 param_grid_logreg = {
-    'model__C': [0.1, 1, 10],
-    'model__solver': ['lbfgs', 'saga', 'sag'],
-    'model__max_iter': [1000]
+    'sampler': [
+        SMOTE(random_state=42),
+        SMOTETomek(random_state=42, tomek=TomekLinks(sampling_strategy='majority'), n_jobs=-1),
+        ADASYN(random_state=42),
+        'passthrough'
+    ],
+    'model__C': [0.1, 1, 10]
 }
 
 # Pipeline 3: Random Forest
 pipe_rf = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('smote', SMOTE(random_state=42)),
-    ('model', RandomForestClassifier(random_state=42, n_jobs=-1))
+    ('sampler', SMOTE(random_state=42)),
+    ('model', RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced'))
 ])
 
 # Param grid for random forest tuning
 param_grid_rf = {
-    'model__n_estimators': [100, 200],
-    'model__max_depth': [20, 30, None],
-    'model__min_samples_leaf': [1, 2, 4],
-    'model__min_samples_split': [2, 5, 10]
+    'sampler': [
+        SMOTE(random_state=42),
+        SMOTETomek(random_state=42, tomek=TomekLinks(sampling_strategy='majority'), n_jobs=-1),
+        ADASYN(random_state=42),
+        'passthrough'
+    ],
+    'model__n_estimators': [10, 200, 300],
+    'model__max_depth': [1, 20, None],
+    'model__min_samples_leaf': [1, 20, 200],
+    'model__min_samples_split': [2, 10, 20],
+    'model__criterion': ['log_loss']
 }
 
-# Pipeline 4: XG Boost
-pipe_xg_boost = Pipeline([
-    ('vectorizer', tuned_vectorizer),
-    ('smote', SMOTE(random_state=42)),
-    ('model', XGBClassifier(objective='multi:softprob', random_state=42, eval_metric='mlogloss', n_jobs=-1))
-])
-
-param_grid_xg = {
-    'model__max_depth': [3, 5, 10],
-    'model__learning_rate':[0.01, 0.1],
-    'model__n_estimators': [100, 200, 500],
-    'model__gamma': [0, 2],
-    'model__reg_alpha': [0.01, 1, 10, 100],
-    'model__reg_lambda': [0.01, 1, 10, 100],
-    'model__colsample_bytree': [0.6, 0.8, 1.0]
-}
-
+# parameters for tuning the vectorizer
 param_grid_vectorizer = {
     'vectorizer__ngram_range': [(1, 1), (1, 2), (1, 3)],
     'vectorizer__max_features': [10000, 15000],
@@ -158,7 +193,6 @@ param_grid_vectorizer = {
     'vectorizer__min_df': [5]
 }
 
-# --- 4. Create a list of the tuners you want to run ---
 tuners_to_run = [
     {
         "name": "complement_nb",
@@ -167,24 +201,20 @@ tuners_to_run = [
     },
     {
         "name": "log_reg",
-        "estimator": pipe_svc,
+        "estimator": pipe_log_reg,
         "params": {**param_grid_vectorizer, **param_grid_logreg}
     },
     {
         "name": "random_forest",
         "estimator": pipe_rf,
         "params": {**param_grid_vectorizer, **param_grid_rf}
-    },
-    # {
-    #     "name": "xg_boost",
-    #     "estimator": pipe_xg_boost,
-    #     "params": {**param_grid_vectorizer, **param_grid_xg}
-    # }
+    }
 ]
 
 joblib.dump(X_test, f"trained_models/X_test.pkl")
 joblib.dump(y_test, f"trained_models/y_test.pkl")
 
+# Hyperparameter tuning
 for tuner in tuners_to_run:
     print(f"--- Tuning Model: {tuner['name']} ---")
 
@@ -192,16 +222,13 @@ for tuner in tuners_to_run:
     random_search = RandomizedSearchCV(
         estimator=tuner["estimator"],
         param_distributions=tuner["params"],
-        n_iter=5,
-        cv=3,
-        scoring='f1_macro',
+        n_iter=15,
+        cv=5,
+        scoring='neg_log_loss',
         random_state=42,
         verbose=1
     )
-    if tuner['name'] == 'xg_boost':
-        random_search.fit(X_train, y_train_encoded)
-    else:
-        random_search.fit(X_train, y_train)
+    random_search.fit(X_train_augmented, y_train_augmented)
     # Save model for predictions
     joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl")
 
