@@ -3,10 +3,9 @@ import os
 import joblib
 import nltk
 import pandas as pd
-from imblearn.combine import SMOTETomek, SMOTEENN
 from imblearn.over_sampling import SMOTE, ADASYN
 from imblearn.pipeline import Pipeline
-from imblearn.under_sampling import TomekLinks
+from imblearn.under_sampling import RandomUnderSampler
 from nltk.stem import WordNetLemmatizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -18,6 +17,7 @@ import nlpaug.augmenter.word as naw
 
 nltk.download('wordnet')
 nltk.download('averaged_perceptron_tagger_eng')
+
 
 # Lemmatizing words for better features
 def clean_text(text):
@@ -135,12 +135,6 @@ pipe_nb = Pipeline([
 
 # Param grid for ComplementNB tuning
 param_grid_nb = {
-    'sampler': [
-        SMOTE(random_state=42),
-        SMOTETomek(random_state=42, tomek=TomekLinks(sampling_strategy='majority'), n_jobs=-1),
-        ADASYN(random_state=42),
-        'passthrough'
-    ],
     'model__alpha': [0.1, 0.5, 0.75, 1.0],
     'model__norm': [True, False],
     'model__fit_prior': [True, False]
@@ -155,12 +149,6 @@ pipe_log_reg = Pipeline([
 
 # Param grid for LogisticRegression tuning
 param_grid_logreg = {
-    'sampler': [
-        SMOTE(random_state=42),
-        SMOTETomek(random_state=42, tomek=TomekLinks(sampling_strategy='majority'), n_jobs=-1),
-        ADASYN(random_state=42),
-        'passthrough'
-    ],
     'model__C': [0.1, 1, 10]
 }
 
@@ -168,23 +156,28 @@ param_grid_logreg = {
 pipe_rf = Pipeline([
     ('vectorizer', tuned_vectorizer),
     ('sampler', SMOTE(random_state=42)),
-    ('model', RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced'))
+    ('model', RandomForestClassifier(random_state=42, n_jobs=-1))
 ])
 
 # Param grid for random forest tuning
 param_grid_rf = {
-    'sampler': [
-        SMOTE(random_state=42),
-        SMOTETomek(random_state=42, tomek=TomekLinks(sampling_strategy='majority'), n_jobs=-1),
-        ADASYN(random_state=42),
-        'passthrough'
-    ],
-    'model__n_estimators': [10, 200, 300],
+    'model__n_estimators': [100, 200, 300, 400],
     'model__max_depth': [1, 20, None],
     'model__min_samples_leaf': [1, 20, 200],
     'model__min_samples_split': [2, 10, 20],
-    'model__criterion': ['log_loss']
+    'model__criterion': ['log_loss', 'entropy']
 }
+
+param_sampler = {
+    'sampler': [
+        SMOTE(random_state=42),
+        ADASYN(random_state=42),
+        ADASYN(random_state=42, sampling_strategy='not majority'),
+        RandomUnderSampler(random_state=42),
+        'passthrough'
+    ]
+}
+
 
 # parameters for tuning the vectorizer
 param_grid_vectorizer = {
@@ -198,17 +191,17 @@ tuners_to_run = [
     {
         "name": "complement_nb",
         "estimator": pipe_nb,
-        "params": {**param_grid_vectorizer, **param_grid_nb}
+        "params": {**param_grid_vectorizer, **param_sampler, **param_grid_nb}
     },
     {
         "name": "log_reg",
         "estimator": pipe_log_reg,
-        "params": {**param_grid_vectorizer, **param_grid_logreg}
+        "params": {**param_grid_vectorizer, **param_sampler, **param_grid_logreg}
     },
     {
         "name": "random_forest",
         "estimator": pipe_rf,
-        "params": {**param_grid_vectorizer, **param_grid_rf}
+        "params": {**param_grid_vectorizer, **param_sampler, **param_grid_rf}
     }
 ]
 
@@ -227,9 +220,10 @@ for tuner in tuners_to_run:
         cv=5,
         scoring='neg_log_loss',
         random_state=42,
-        verbose=1
+        verbose=1,
+        error_score='raise'
     )
     random_search.fit(X_train_augmented, y_train_augmented)
     # Save model for predictions
-    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl")
+    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=5)
 
