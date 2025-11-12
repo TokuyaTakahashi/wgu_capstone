@@ -3,9 +3,9 @@ import os
 import joblib
 import nltk
 import pandas as pd
-from imblearn.over_sampling import SMOTE, ADASYN
+from imblearn.over_sampling import SMOTE, ADASYN, RandomOverSampler
 from imblearn.pipeline import Pipeline
-from imblearn.under_sampling import RandomUnderSampler
+from imblearn.under_sampling import RandomUnderSampler, TomekLinks
 from nltk.stem import WordNetLemmatizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -83,7 +83,7 @@ X = df['input_text'].copy()
 # Routing Group column
 y = df['queue'].copy()
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, stratify=y, random_state=42)
 
 df_train = pd.DataFrame({
     'input_text': X_train,
@@ -92,7 +92,7 @@ df_train = pd.DataFrame({
 
 # Identify minority classes
 class_counts = df_train['queue_encoded'].value_counts()
-minority_classes = class_counts[class_counts < 500].index
+minority_classes = class_counts[class_counts < 1000].index
 minority_df = df_train[df_train['queue_encoded'].isin(minority_classes)]
 
 print(f"Original training size: {len(df_train)}")
@@ -123,13 +123,14 @@ tuned_vectorizer = TfidfVectorizer(
     ngram_range=(1, 2),
     max_df=0.90,
     min_df=5,
-    max_features=10000
+    max_features=100000
 )
 
 # Pipeline 1: ComplementNB
 pipe_nb = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('sampler', SMOTE(random_state=42)),
+    ('under_sampler', 'passthrough'),
+    ('over_sampler', SMOTE(random_state=42)),
     ('model', ComplementNB())
 ])
 
@@ -143,7 +144,8 @@ param_grid_nb = {
 # Pipeline 2: LogisticRegression
 pipe_log_reg = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('sampler', SMOTE(random_state=42)),
+    ('under_sampler', 'passthrough'),
+    ('over_sampler', SMOTE(random_state=42)),
     ('model', LogisticRegression(solver='saga', n_jobs=-1))
 ])
 
@@ -155,7 +157,8 @@ param_grid_logreg = {
 # Pipeline 3: Random Forest
 pipe_rf = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('sampler', SMOTE(random_state=42)),
+    ('under_sampler', 'passthrough'),
+    ('over_sampler', SMOTE(random_state=42)),
     ('model', RandomForestClassifier(random_state=42, n_jobs=-1))
 ])
 
@@ -165,16 +168,20 @@ param_grid_rf = {
     'model__max_depth': [1, 20, None],
     'model__min_samples_leaf': [1, 20, 200],
     'model__min_samples_split': [2, 10, 20],
-    'model__criterion': ['log_loss', 'entropy']
+    'model__criterion': ['log_loss', 'entropy'],
+    'model__class_weight' : ['balanced_subsample', 'balanced']
 }
 
 param_sampler = {
-    'sampler': [
+    'over_sampler': [
         SMOTE(random_state=42),
         ADASYN(random_state=42),
         ADASYN(random_state=42, sampling_strategy='not majority'),
-        RandomUnderSampler(random_state=42),
+        RandomOverSampler(random_state=42),
         'passthrough'
+    ],
+    'under_sampler': [
+        TomekLinks()
     ]
 }
 
@@ -218,12 +225,12 @@ for tuner in tuners_to_run:
         param_distributions=tuner["params"],
         n_iter=15,
         cv=5,
-        scoring='neg_log_loss',
+        scoring='f1_macro',
         random_state=42,
         verbose=1,
         error_score='raise'
     )
     random_search.fit(X_train_augmented, y_train_augmented)
     # Save model for predictions
-    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=5)
+    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=3)
 
