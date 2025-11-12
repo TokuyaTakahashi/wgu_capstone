@@ -129,7 +129,6 @@ tuned_vectorizer = TfidfVectorizer(
 # Pipeline 1: ComplementNB
 pipe_nb = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('under_sampler', 'passthrough'),
     ('over_sampler', SMOTE(random_state=42)),
     ('model', ComplementNB())
 ])
@@ -144,7 +143,6 @@ param_grid_nb = {
 # Pipeline 2: LogisticRegression
 pipe_log_reg = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('under_sampler', 'passthrough'),
     ('over_sampler', SMOTE(random_state=42)),
     ('model', LogisticRegression(solver='saga', n_jobs=-1))
 ])
@@ -157,7 +155,6 @@ param_grid_logreg = {
 # Pipeline 3: Random Forest
 pipe_rf = Pipeline([
     ('vectorizer', tuned_vectorizer),
-    ('under_sampler', 'passthrough'),
     ('over_sampler', SMOTE(random_state=42)),
     ('model', RandomForestClassifier(random_state=42, n_jobs=-1))
 ])
@@ -180,9 +177,6 @@ param_sampler = {
         RandomOverSampler(random_state=42),
         'passthrough'
     ],
-    'under_sampler': [
-        TomekLinks()
-    ]
 }
 
 
@@ -232,5 +226,5 @@ for tuner in tuners_to_run:
     )
     random_search.fit(X_train_augmented, y_train_augmented)
     # Save model for predictions
-    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=3)
+    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl")
 
