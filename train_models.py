@@ -5,10 +5,10 @@ import nltk
 import pandas as pd
 from imblearn.over_sampling import SMOTE, ADASYN, RandomOverSampler
 from imblearn.pipeline import Pipeline
-from imblearn.under_sampling import RandomUnderSampler, TomekLinks
 from nltk.stem import WordNetLemmatizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.naive_bayes import ComplementNB
@@ -123,7 +123,7 @@ tuned_vectorizer = TfidfVectorizer(
     ngram_range=(1, 2),
     max_df=0.90,
     min_df=5,
-    max_features=100000
+    max_features=10000
 )
 
 # Pipeline 1: ComplementNB
@@ -144,29 +144,30 @@ param_grid_nb = {
 pipe_log_reg = Pipeline([
     ('vectorizer', tuned_vectorizer),
     ('over_sampler', SMOTE(random_state=42)),
-    ('model', LogisticRegression(solver='saga', n_jobs=-1))
+    ('model', LogisticRegression(solver='saga', n_jobs=-1, penalty='l1', random_state=42, max_iter=5000))
 ])
 
 # Param grid for LogisticRegression tuning
 param_grid_logreg = {
-    'model__C': [0.1, 1, 10]
+    'model__C': [0.1, 1, 10],
+    'model__class_weight': ['balanced', None]
 }
 
 # Pipeline 3: Random Forest
 pipe_rf = Pipeline([
     ('vectorizer', tuned_vectorizer),
     ('over_sampler', SMOTE(random_state=42)),
-    ('model', RandomForestClassifier(random_state=42, n_jobs=-1))
+    ('model', RandomForestClassifier(random_state=42, n_jobs=-1, class_weight='balanced'))
 ])
 
 # Param grid for random forest tuning
 param_grid_rf = {
-    'model__n_estimators': [100, 200, 300, 400],
-    'model__max_depth': [1, 20, None],
+    'model__n_estimators': [100, 200, 300, 600],
+    'model__max_depth': [1, 20, 400],
     'model__min_samples_leaf': [1, 20, 200],
     'model__min_samples_split': [2, 10, 20],
-    'model__criterion': ['log_loss', 'entropy'],
-    'model__class_weight' : ['balanced_subsample', 'balanced']
+    'model__criterion': ['gini', 'log_loss', 'entropy'],
+    'model__class_weight': ['balanced_subsample', 'balanced']
 }
 
 param_sampler = {
@@ -182,10 +183,9 @@ param_sampler = {
 
 # parameters for tuning the vectorizer
 param_grid_vectorizer = {
-    'vectorizer__ngram_range': [(1, 1), (1, 2), (1, 3)],
+    'vectorizer__ngram_range': [(1, 2), (1, 3)],
     'vectorizer__max_features': [10000, 15000],
-    'vectorizer__max_df': [0.6, 0.7, 0.8, 0.9],
-    'vectorizer__min_df': [5]
+    'vectorizer__min_df': [3, 5]
 }
 
 tuners_to_run = [
@@ -226,5 +226,5 @@ for tuner in tuners_to_run:
     )
     random_search.fit(X_train_augmented, y_train_augmented)
     # Save model for predictions
-    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=3)
+    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=5)
 
