@@ -10,10 +10,18 @@ from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix
 
 
+@st.cache_resource
+def load_all_models(model_map, model_dir='trained_models'):
+    loaded_models = {}
+    for name, filename in model_map.items():
+        model_path = os.path.join(model_dir, filename)
+        loaded_models[name] = joblib.load(model_path)
+    return loaded_models
+
+
 def apply_prediction():
     if st.session_state.ticket_input:
-        full_path = os.path.join('trained_models', trained_models[st.session_state.sidebar])
-        loaded_pipeline = joblib.load(full_path)
+        loaded_pipeline = st.session_state.all_models[st.session_state.sidebar]
         ticket_desc = st.session_state.ticket_input
         st.session_state.prediction = loaded_pipeline.predict([ticket_desc])
         st.session_state.prediction_prob = loaded_pipeline.predict_proba([ticket_desc])
@@ -42,6 +50,9 @@ trained_models = {
     "Random Forest": "random_forest_ticket_classifier.pkl",
 }
 
+if 'all_models' not in st.session_state:
+    st.session_state.all_models = load_all_models(trained_models)
+
 st.set_page_config(layout="centered")
 
 # Sidebar - Select box for model selection
@@ -54,7 +65,7 @@ with st.sidebar:
         st.badge(group, icon=emoji, color=color)
 
 # Load trained models and test data for predictions and accuracy metrics
-selected_model = joblib.load(os.path.join('trained_models', trained_models[st.session_state.sidebar]))
+selected_model = st.session_state.all_models[st.session_state.sidebar]
 X_test = joblib.load(os.path.join('trained_models', 'X_test.pkl'))
 y_test = joblib.load(os.path.join('trained_models', 'y_test.pkl'))
 encoder = LabelEncoder()
