@@ -226,5 +226,5 @@ for tuner in tuners_to_run:
     )
     random_search.fit(X_train_augmented, y_train_augmented)
     # Save model for predictions
-    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl")
+    joblib.dump(random_search.best_estimator_, f"trained_models/{tuner['name']}_ticket_classifier.pkl", compress=3)
 
